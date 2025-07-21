@@ -1,15 +1,108 @@
 """
-MongoDB database configuration and setup for Mergington High School API
+Database configuration and setup for Mergington High School API
 """
 
-from pymongo import MongoClient
 from argon2 import PasswordHasher
 
-# Connect to MongoDB
-client = MongoClient('mongodb://localhost:27017/')
-db = client['mergington_high']
-activities_collection = db['activities']
-teachers_collection = db['teachers']
+# In-memory data storage for demo purposes
+# In a production environment, this would use MongoDB
+activities_data = {}
+teachers_data = {}
+
+# Mock collections for in-memory storage
+class MockCollection:
+    def __init__(self, data_dict):
+        self.data = data_dict
+    
+    def count_documents(self, filter):
+        return len(self.data)
+    
+    def insert_one(self, doc):
+        _id = doc.pop('_id')
+        self.data[_id] = doc
+        return type('Result', (), {'inserted_id': _id})()
+    
+    def find_one(self, filter):
+        if '_id' in filter:
+            return self.data.get(filter['_id'])
+        return None
+    
+    def find(self, filter=None):
+        """Find documents matching filter"""
+        if filter is None or not filter:
+            # Return all documents
+            for _id, doc in self.data.items():
+                result = doc.copy()
+                result['_id'] = _id
+                yield result
+        else:
+            # Simple filter implementation for schedule_details.days
+            for _id, doc in self.data.items():
+                matches = True
+                
+                # Handle schedule_details.days filter
+                if "schedule_details.days" in filter:
+                    days_filter = filter["schedule_details.days"]
+                    if "$in" in days_filter:
+                        target_days = days_filter["$in"]
+                        if "schedule_details" in doc and "days" in doc["schedule_details"]:
+                            doc_days = doc["schedule_details"]["days"]
+                            if not any(day in doc_days for day in target_days):
+                                matches = False
+                        else:
+                            matches = False
+                
+                # Handle time filters
+                if "schedule_details.start_time" in filter:
+                    time_filter = filter["schedule_details.start_time"]
+                    if "$gte" in time_filter:
+                        target_time = time_filter["$gte"]
+                        if "schedule_details" in doc and "start_time" in doc["schedule_details"]:
+                            if doc["schedule_details"]["start_time"] < target_time:
+                                matches = False
+                        else:
+                            matches = False
+                            
+                if "schedule_details.end_time" in filter:
+                    time_filter = filter["schedule_details.end_time"]
+                    if "$lte" in time_filter:
+                        target_time = time_filter["$lte"]
+                        if "schedule_details" in doc and "end_time" in doc["schedule_details"]:
+                            if doc["schedule_details"]["end_time"] > target_time:
+                                matches = False
+                        else:
+                            matches = False
+                
+                if matches:
+                    result = doc.copy()
+                    result['_id'] = _id
+                    yield result
+    
+    def aggregate(self, pipeline):
+        """Simple aggregation pipeline support"""
+        # For now, just return empty list since we don't need this for basic functionality
+        return []
+    
+    def update_one(self, filter, update):
+        if '_id' in filter:
+            _id = filter['_id']
+            if _id in self.data:
+                if '$set' in update:
+                    self.data[_id].update(update['$set'])
+                elif '$push' in update:
+                    for field, value in update['$push'].items():
+                        if field not in self.data[_id]:
+                            self.data[_id][field] = []
+                        self.data[_id][field].append(value)
+                elif '$pull' in update:
+                    for field, value in update['$pull'].items():
+                        if field in self.data[_id] and value in self.data[_id][field]:
+                            self.data[_id][field].remove(value)
+        return type('Result', (), {'modified_count': 1})()
+
+# Create mock collections
+activities_collection = MockCollection(activities_data)
+teachers_collection = MockCollection(teachers_data)
 
 # Methods
 def hash_password(password):
@@ -163,6 +256,17 @@ initial_activities = {
         },
         "max_participants": 16,
         "participants": ["william@mergington.edu", "jacob@mergington.edu"]
+    },
+    "Manga Maniacs": {
+        "description": "Explore the fantastic stories of the most interesting characters from Japanese Manga (graphic novels).",
+        "schedule": "Tuesdays, 7:00 PM - 9:00 PM",
+        "schedule_details": {
+            "days": ["Tuesday"],
+            "start_time": "19:00",
+            "end_time": "21:00"
+        },
+        "max_participants": 15,
+        "participants": []
     }
 }
 
